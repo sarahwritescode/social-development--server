@@ -1,8 +1,8 @@
 
-
+import { verifyToken } from "./middleware/verifyToken.js";
 import express from "express";
 import cors from "cors";
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 import "dotenv/config";
 
 // Server port
@@ -23,6 +23,7 @@ app.use(express.json());
 const client = new MongoClient(process.env.MONGODB_URI);
 const db = client.db("social-development-event");
 const eventsCollection = db.collection("events");
+const joinedEventsCollection = db.collection("joinedEvents");
 
 // Connect to MongoDB
 export async function connectToMongoDB() {
@@ -44,7 +45,9 @@ app.get("/", (req, res) => {
 });
 
 // CREATE EVENT API
-app.post("/api/events", async (req, res) => {
+
+
+app.post("/api/events", verifyToken, async (req, res) => {
   try {
     const {
       title,
@@ -53,18 +56,15 @@ app.post("/api/events", async (req, res) => {
       imageUrl,
       location,
       eventDate,
-      createdBy,
     } = req.body;
 
-    // Required field validation
     if (
       !title?.trim() ||
       !description?.trim() ||
       !eventType ||
       !imageUrl?.trim() ||
       !location?.trim() ||
-      !eventDate ||
-      !createdBy
+      !eventDate
     ) {
       return res.status(400).send({
         success: false,
@@ -72,24 +72,18 @@ app.post("/api/events", async (req, res) => {
       });
     }
 
-    // Date validation
     const selectedDate = new Date(eventDate);
 
-    if (Number.isNaN(selectedDate.getTime())) {
+    if (
+      Number.isNaN(selectedDate.getTime()) ||
+      selectedDate <= new Date()
+    ) {
       return res.status(400).send({
         success: false,
-        message: "Please provide a valid event date.",
+        message: "Please provide a valid future event date.",
       });
     }
 
-    if (selectedDate <= new Date()) {
-      return res.status(400).send({
-        success: false,
-        message: "Event date must be in the future.",
-      });
-    }
-
-    // Event document
     const newEvent = {
       title: title.trim(),
       description: description.trim(),
@@ -97,11 +91,14 @@ app.post("/api/events", async (req, res) => {
       imageUrl: imageUrl.trim(),
       location: location.trim(),
       eventDate: selectedDate,
-      createdBy,
+
+      // Verified user information
+      createdBy: req.user.email,
+      createdById: req.user.id,
+
       createdAt: new Date(),
     };
 
-    // Save to MongoDB
     const result = await eventsCollection.insertOne(newEvent);
 
     res.status(201).send({
@@ -119,8 +116,6 @@ app.post("/api/events", async (req, res) => {
   }
 });
 
-
-import { ObjectId } from "mongodb";
 
 // GET ALL UPCOMING EVENTS
 app.get("/api/events", async (req, res) => {
@@ -175,6 +170,156 @@ app.get("/api/events/:id", async (req, res) => {
     res.status(500).send({
       success: false,
       message: "Failed to fetch event.",
+    });
+  }
+});
+
+
+app.get("/api/test-auth", verifyToken, (req, res) => {
+  res.send({
+    success: true,
+    message: "JWT verified successfully!",
+    user: req.user,
+  });
+});
+
+
+// GET MY EVENTS
+app.get("/api/my-events", verifyToken, async (req, res) => {
+  try {
+    const events = await eventsCollection
+      .find({ createdById: req.user.id })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.send({
+      success: true,
+      events,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({
+      success: false,
+      message: "Failed to fetch your events.",
+    });
+  }
+});
+
+// UPDATE MY EVENT
+app.patch("/api/events/:id", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid event ID.",
+      });
+    }
+
+    const {
+      title,
+      description,
+      eventType,
+      imageUrl,
+      location,
+      eventDate,
+    } = req.body;
+
+    const updates = {};
+
+    if (title !== undefined) updates.title = title.trim();
+    if (description !== undefined) updates.description = description.trim();
+    if (eventType !== undefined) updates.eventType = eventType;
+    if (imageUrl !== undefined) updates.imageUrl = imageUrl.trim();
+    if (location !== undefined) updates.location = location.trim();
+
+    if (eventDate !== undefined) {
+      const selectedDate = new Date(eventDate);
+
+      if (
+        Number.isNaN(selectedDate.getTime()) ||
+        selectedDate <= new Date()
+      ) {
+        return res.status(400).send({
+          success: false,
+          message: "Please provide a valid future event date.",
+        });
+      }
+
+      updates.eventDate = selectedDate;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).send({
+        success: false,
+        message: "No fields provided to update.",
+      });
+    }
+
+    updates.updatedAt = new Date();
+
+    const result = await eventsCollection.updateOne(
+      {
+        _id: new ObjectId(id),
+        createdById: req.user.id,
+      },
+      { $set: updates }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        success: false,
+        message: "Event not found or you are not the owner.",
+      });
+    }
+
+    res.send({
+      success: true,
+      message: "Event updated successfully!",
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({
+      success: false,
+      message: "Failed to update event.",
+    });
+  }
+});
+
+// DELETE MY EVENT
+app.delete("/api/events/:id", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid event ID.",
+      });
+    }
+
+    const result = await eventsCollection.deleteOne({
+      _id: new ObjectId(id),
+      createdById: req.user.id,
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).send({
+        success: false,
+        message: "Event not found or you are not the owner.",
+      });
+    }
+
+    res.send({
+      success: true,
+      message: "Event deleted successfully!",
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({
+      success: false,
+      message: "Failed to delete event.",
     });
   }
 });
