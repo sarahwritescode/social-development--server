@@ -323,6 +323,109 @@ app.delete("/api/events/:id", verifyToken, async (req, res) => {
     });
   }
 });
+// JOIN EVENT API
+app.post("/api/events/:id/join", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid event ID.",
+      });
+    }
+
+    // Check if event exists
+    const event = await eventsCollection.findOne({
+      _id: new ObjectId(id),
+      eventDate: { $gt: new Date() },
+    });
+
+    if (!event) {
+      return res.status(404).send({
+        success: false,
+        message: "Upcoming event not found.",
+      });
+    }
+
+    // Prevent duplicate joining
+    const existingJoin = await joinedEventsCollection.findOne({
+      eventId: new ObjectId(id),
+      userId: req.user.id,
+    });
+
+    if (existingJoin) {
+      return res.status(409).send({
+        success: false,
+        message: "You have already joined this event.",
+      });
+    }
+
+    const joinData = {
+      eventId: new ObjectId(id),
+      userId: req.user.id,
+      userEmail: req.user.email,
+      joinedAt: new Date(),
+    };
+
+    await joinedEventsCollection.insertOne(joinData);
+
+    res.status(201).send({
+      success: true,
+      message: "You have successfully joined the event!",
+    });
+  } catch (error) {
+    console.error("Join event error:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to join event.",
+    });
+  }
+});
+
+// GET JOINED EVENTS API
+app.get("/api/joined-events", verifyToken, async (req, res) => {
+  try {
+    const joinedEvents = await joinedEventsCollection
+      .aggregate([
+        {
+          $match: {
+            userId: req.user.id,
+          },
+        },
+        {
+          $lookup: {
+            from: "events",
+            localField: "eventId",
+            foreignField: "_id",
+            as: "event",
+          },
+        },
+        {
+          $unwind: "$event",
+        },
+        {
+          $sort: {
+            "event.eventDate": 1,
+          },
+        },
+      ])
+      .toArray();
+
+    res.send({
+      success: true,
+      joinedEvents,
+    });
+  } catch (error) {
+    console.error("Joined events error:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to fetch joined events.",
+    });
+  }
+});
 
 
 // Start server
