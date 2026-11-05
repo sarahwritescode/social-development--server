@@ -25,19 +25,34 @@ const db = client.db("social-development-event");
 const eventsCollection = db.collection("events");
 const joinedEventsCollection = db.collection("joinedEvents");
 
-// Connect to MongoDB
+
+// Connect to MongoDB (reuse connection)
+let connectionPromise;
+
 export async function connectToMongoDB() {
+  if (!connectionPromise) {
+    connectionPromise = client.connect().catch((error) => {
+      connectionPromise = null;
+      throw error;
+    });
+  }
+
+  return connectionPromise;
+}
+// Ensure MongoDB is connected before handling API requests
+app.use(async (req, res, next) => {
   try {
-    await client.connect();
-
-    console.log("You successfully connected to MongoDB!");
-
-    return client;
+    await connectToMongoDB();
+    next();
   } catch (error) {
     console.error("MongoDB connection failed:", error);
-    throw error;
+
+    res.status(500).send({
+      success: false,
+      message: "Database connection failed.",
+    });
   }
-}
+});
 
 // Home route
 app.get("/", (req, res) => {
@@ -428,17 +443,18 @@ app.get("/api/joined-events", verifyToken, async (req, res) => {
 });
 
 
-// Start server
-async function startServer() {
-  try {
-    await connectToMongoDB();
+// Export Express app for Vercel
+export default app;
 
-    app.listen(PORT, () => {
-      console.log(`Kindora API is running on port ${PORT}`);
+// Start local server during development
+if (!process.env.VERCEL) {
+  connectToMongoDB()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`Kindora API is running on port ${PORT}`);
+      });
+    })
+    .catch((error) => {
+      console.error("Server failed to start:", error);
     });
-  } catch (error) {
-    console.error("Server failed to start:", error);
-  }
 }
-
-startServer();
