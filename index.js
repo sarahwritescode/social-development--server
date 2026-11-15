@@ -12,9 +12,24 @@ const PORT = 5000;
 const app = express();
 
 // Middleware
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://social-development-events-platform-gamma.vercel.app",
+];
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URI || "http://localhost:3000",
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+
+      const normalizedOrigin = origin.replace(/\/+$/, "");
+
+      if (allowedOrigins.includes(normalizedOrigin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Not allowed by CORS"));
+    },
   })
 );
 app.use(express.json());
