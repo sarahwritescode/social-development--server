@@ -14,7 +14,7 @@ const app = express();
 // Middleware
 const allowedOrigins = [
   "http://localhost:3000",
-  "https://social-development-events-platform-gamma.vercel.app",
+  process.env.CLIENT_URI,
 ];
 
 app.use(
