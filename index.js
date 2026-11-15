@@ -14,7 +14,7 @@ const app = express();
 // Middleware
 app.use(
   cors({
-    origin: process.env.CLIENT_URI,
+    origin: process.env.CLIENT_URI || "http://localhost:3000",
   })
 );
 app.use(express.json());
